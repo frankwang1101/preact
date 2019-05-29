@@ -57,14 +57,16 @@ describe('getDomSibling', () => {
 		render((
 			<div>
 				<Fragment>
-					<div>A</div>
+					<Fragment>
+						<div>A</div>
+					</Fragment>
 				</Fragment>
 				<Fragment>
 					<div>B</div>
 				</Fragment>
 			</div>
 		), scratch);
-		let vnode = scratch._prevVNode._children[0]._children[0]._children[0];
+		let vnode = scratch._prevVNode._children[0]._children[0]._children[0]._children[0];
 		expect(getDomSibling(vnode)).to.equal(scratch.firstChild.childNodes[1]);
 	});
 });
