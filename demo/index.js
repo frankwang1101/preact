@@ -92,18 +92,20 @@ const h1 = () => <h1>1111</h1>
 //   }
 // }
 
-const Home = () => {
-  const [state, setState] = useState(0)
-  useEffect(() => {
-    console.log('effect active!')
-  }, [state])
-  const random = () => {
-    setState(parseInt(Math.random() * 10))
-  }
-  return (
-    <div onClick={random}>{state}</div>
-  )
-}
+// const Home = () => {
+//   const [state, setState] = useState(0)
+//   useEffect(() => {
+//     console.log('effect active!')
+//   }, [state])
+//   const random = () => {
+//     setState(parseInt(Math.random() * 10))
+//   }
+//   return (
+//     <div onClick={random}>{state}</div>
+//   )
+// }
+
+const Home = h1
 
 class DevtoolsWarning extends Component {
   onClick = () => {

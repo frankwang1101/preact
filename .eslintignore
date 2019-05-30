@@ -2,4 +2,5 @@ test/fixtures
 test/ts/
 *.ts
 src/*
+src-n/*
 demo/*

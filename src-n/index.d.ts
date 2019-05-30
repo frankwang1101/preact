@@ -12,8 +12,7 @@ declare namespace preact {
 
 	interface VNode<P = {}> {
 		type: ComponentType<P> | string | null;
-		props: P & { children: ComponentChildren } | null;
-		text: string | number | null;
+		props: P & { children: ComponentChildren } | string | number | null;
 		key: Key;
 		ref: Ref<any> | null;
 		/**
@@ -117,7 +116,7 @@ declare namespace preact {
 		state: Readonly<S>;
 		props: RenderableProps<P>;
 		context: any;
-		base?: HTMLElement;
+		base?: Element | Text;
 
 		// From https://github.com/DefinitelyTyped/DefinitelyTyped/blob/e836acc75a78cf0655b5dfdbe81d69fdd4d8a252/types/react/index.d.ts#L402
 		// // We MUST keep setState() as a unified signature because it allows proper checking of the method return type.
@@ -160,8 +159,12 @@ declare namespace preact {
 	// Preact render
 	// -----------------------------------
 
-	function render(vnode: ComponentChild, parent: Element | Document | ShadowRoot | DocumentFragment): void
-	function hydrate(vnode: ComponentChild, parent: Element | Document | ShadowRoot | DocumentFragment): void
+	function render(
+		vnode: ComponentChild,
+		parent: Element | Document | ShadowRoot | DocumentFragment,
+		replaceNode?: Element | Text
+	): void;
+	function hydrate(vnode: ComponentChild, parent: Element | Document | ShadowRoot | DocumentFragment): void;
 	function cloneElement(vnode: JSX.Element, props: any, ...children: ComponentChildren[]): JSX.Element;
 
 	//
@@ -191,9 +194,12 @@ declare namespace preact {
 		diff?(vnode: VNode): void;
 		/** Attach a hook that is invoked before a vnode has rendered. */
 		render?(vnode: VNode): void;
+		/** Attach a hook that is invoked before a hook's state is queried. */
+		hook?(component: Component): void;
 		/** Attach a hook that is invoked after a vnode has rendered. */
 		diffed?(vnode: VNode): void;
 		event?(e: Event): void;
+		useDebugValue?(value: string | number): void;
 	}
 
 	const options: Options;
@@ -225,4 +231,16 @@ declare namespace preact {
 	interface PreactContext<T> extends Context<T> {}
 
 	function createContext<T>(defaultValue: T): Context<T>;
+
+	//
+	// Suspense/lazy
+	// -----------------------------------
+	function lazy<T>(loader: () => Promise<{default: T}>): T;
+
+	interface SuspenseProps {
+		children?: ComponentChildren;
+		fallback: ComponentChildren;
+	}
+
+	abstract class Suspense extends Component<SuspenseProps> {}
 }

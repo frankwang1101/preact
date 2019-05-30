@@ -7,44 +7,51 @@ export let i = 0;
  * @param {any} defaultValue
  */
 export function createContext(defaultValue) {
-	const ctx = {};
+	const id = '__cC' + i++;
 
-	const context = {
-		_id: '__cC' + i++,
-		_defaultValue: defaultValue,
-		Consumer(props, context) {
-			return props.children(context);
-		},
-		Provider(props) {
-			if (!this.getChildContext) {
-				const subs = [];
-				this.getChildContext = () => {
-					ctx[context._id] = this;
-					return ctx;
-				};
-				this.shouldComponentUpdate = props => {
-					subs.some(c => {
-						// Check if still mounted
-						if (c._parentDom) {
-							c.context = props.value;
-							enqueueRender(c);
-						}
-					});
-				};
-				this.sub = (c) => {
-					subs.push(c);
-					let old = c.componentWillUnmount;
-					c.componentWillUnmount = () => {
-						subs.splice(subs.indexOf(c), 1);
-						old && old.call(c);
-					};
-				};
-			}
-			return props.children;
-		}
+	let context = {
+		_id: id,
+		_defaultValue: defaultValue
 	};
 
-	context.Consumer.contextType = context;
+	function Consumer(props, context) {
+		return props.children(context);
+	}
+	Consumer.contextType = context;
+	context.Consumer = Consumer;
+
+	let ctx = { [id]: null };
+
+	function initProvider(comp) {
+		const subs = [];
+		comp.getChildContext = () => {
+			ctx[id] = comp;
+			return ctx;
+		};
+		comp.shouldComponentUpdate = props => {
+			subs.map(c => {
+				// Check if still mounted
+				if (c._parentDom) {
+					c.context = props.value;
+					enqueueRender(c);
+				}
+			});
+		};
+		comp.sub = (c) => {
+			subs.push(c);
+			let old = c.componentWillUnmount;
+			c.componentWillUnmount = () => {
+				subs.splice(subs.indexOf(c), 1);
+				old && old();
+			};
+		};
+	}
+
+	function Provider(props) {
+		if (!this.getChildContext) initProvider(this);
+		return props.children;
+	}
+	context.Provider = Provider;
 
 	return context;
 }
