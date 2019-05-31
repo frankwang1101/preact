@@ -11,27 +11,28 @@ import { Fragment } from './create-element'
  * getChildContext
  */
 export function Component(props, context) {
-  this.props = props
-  this.context = context
-  // this.constructor // When component is functional component, this is reset to functional component
-  // if (this.state==null) this.state = {};
-  // this.state = {};
-  // this._dirty = true;
-  // this._renderCallbacks = []; // Only class components
+	this.props = props
+	this.context = context
+	// this.constructor // When component is functional component, this is reset to functional component
+	// if (this.state==null) this.state = {};
+	// this.state = {};
+	// this._dirty = true;
+	// this._renderCallbacks = []; // Only class components
 
-  // Other properties that Component will have set later,
-  // shown here as commented out for quick reference
-  // this.base = null;
-  // this._context = null;
-  // this._ancestorComponent = null; // Always set right after instantiation
-  // this._vnode = null;
-  // this._nextState = null; // Only class components
-  // this._prevVNode = null;
-  // this._processingException = null; // Always read, set only when handling error
+	// Other properties that Component will have set later,
+	// shown here as commented out for quick reference
+	// this.base = null;
+	// this._context = null;
+	// this._ancestorComponent = null; // Always set right after instantiation
+	// this._vnode = null;
+	// this._nextState = null; // Only class components
+	// this._prevVNode = null;
+	// this._processingException = null; // Always read, set only when handling error
+	// this._pendingError = null; // Always read, set only when handling error. This is used to indicate at diffTime to set _processingException
 }
 
 /**
- * Update component state and schedule a re-render.
+ * Update component state and schedule a re-render. 更新组件state并安排一次重新渲染
  * @param {object | ((s: object, p: object) => object)} update A hash of state
  * properties to update with new values or a function that given the current
  * state and props returns a new partial state
@@ -39,23 +40,27 @@ export function Component(props, context) {
  * updated
  */
 Component.prototype.setState = function(update, callback) {
-  // only clone state when copying to nextState the first time.
-  let s =
-    (this._nextState !== this.state && this._nextState) ||
-    (this._nextState = assign({}, this.state))
+	// only clone state when copying to nextState the first time.
+	// 只有在第一次初始化时， _nextState !== this.state , 此时将 state 拷贝到 _nextState中
+	let s =
+		(this._nextState !== this.state && this._nextState) ||
+		(this._nextState = assign({}, this.state))
 
-  // if update() mutates state in-place, skip the copy:
-  if (typeof update !== 'function' || (update = update(s, this.props))) {
-    assign(s, update)
-  }
+	// if update() mutates state in-place, skip the copy:
+	// 如果更新s
+	if (typeof update !== 'function' || (update = update(s, this.props))) {
+		assign(s, update)
+	}
 
-  // Skip update if updater function returned null
-  if (update == null) return
+	// Skip update if updater function returned null
+	if (update == null) return
 
-  if (this._vnode) {
-    if (callback) this._renderCallbacks.push(callback)
-    enqueueRender(this)
-  }
+	if (this._vnode) {
+		// 如果有回调，回调入列
+		if (callback) this._renderCallbacks.push(callback)
+		// 渲染入列
+		enqueueRender(this)
+	}
 }
 
 /**
@@ -64,34 +69,37 @@ Component.prototype.setState = function(update, callback) {
  * re-renderd
  */
 Component.prototype.forceUpdate = function(callback) {
-  let vnode = this._vnode,
-    dom = this._vnode._dom,
-    parentDom = this._parentDom
-  if (parentDom) {
-    // Set render mode so that we can differantiate where the render request
-    // is coming from. We need this because forceUpdate should never call
-    // shouldComponentUpdate
-    const force = callback !== false
+	let vnode = this._vnode,
+		dom = this._vnode._dom,
+		parentDom = this._parentDom
+	if (parentDom) {
+		// Set render mode so that we can differantiate where the render request
+		// is coming from. We need this because forceUpdate should never call
+		// shouldComponentUpdate
+		// 用这个使得 scu 不会被触发
+		const force = callback !== false
 
-    let mounts = []
-    dom = diff(
-      dom,
-      parentDom,
-      vnode,
-      vnode,
-      this._context,
-      parentDom.ownerSVGElement !== undefined,
-      null,
-      mounts,
-      this._ancestorComponent,
-      force
-    )
-    if (dom != null && dom.parentNode !== parentDom) {
-      parentDom.appendChild(dom)
-    }
-    commitRoot(mounts, vnode)
-  }
-  if (callback) callback()
+		let mounts = []
+		// 生成dom
+		dom = diff(
+			parentDom,
+			vnode,
+			vnode,
+			this._context,
+			parentDom.ownerSVGElement !== undefined,
+			null,
+			mounts,
+			this._ancestorComponent,
+			force,
+			dom
+		)
+		// 判断是否是新dom，是则append
+		if (dom != null && dom.parentNode !== parentDom) {
+			parentDom.appendChild(dom)
+		}
+		commitRoot(mounts, vnode)
+	}
+	if (callback) callback()
 }
 
 /**
@@ -117,9 +125,9 @@ let q = []
  * @type {(cb) => void}
  */
 const defer =
-  typeof Promise == 'function'
-    ? Promise.prototype.then.bind(Promise.resolve())
-    : setTimeout
+	typeof Promise == 'function'
+		? Promise.prototype.then.bind(Promise.resolve())
+		: setTimeout
 
 /*
  * The value of `Component.debounce` must asynchronously invoke the passed in callback. It is
@@ -135,16 +143,21 @@ const defer =
  * @param {import('./internal').Component} c The component to rerender
  */
 export function enqueueRender(c) {
-  if (!c._dirty && (c._dirty = true) && q.push(c) === 1) {
-    ;(options.debounceRendering || defer)(process)
-  }
+	// dirty属性, 用于在scu判断是设置为false跳过渲染
+	if (!c._dirty && (c._dirty = true) && q.push(c) === 1) {
+		// 如果设置了debounceRendering,使用它来调用process（必须为异步）, 否则使用 Promise.resovle -> setTimeout
+		;(options.debounceRendering || defer)(process)
+	}
 }
 
 /** Flush the render queue by rerendering all queued components */
 function process() {
-  let p
-  while ((p = q.pop())) {
-    // forceUpdate's callback argument is reused here to indicate a non-forced update.
-    if (p._dirty) p.forceUpdate(false)
-  }
+	let p
+	// 根据在diff中设置的层级，由深层到浅层触发 forceUpdate
+	q.sort((a, b) => b._depth - a._depth)
+	while ((p = q.pop())) {
+		// forceUpdate's callback argument is reused here to indicate a non-forced update.
+		// 使用dirty来禁止已入队的组件update
+		if (p._dirty) p.forceUpdate(false)
+	}
 }

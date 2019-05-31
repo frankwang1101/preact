@@ -105,7 +105,16 @@ const h1 = () => <h1>1111</h1>
 //   )
 // }
 
-const Home = h1
+const Home = () => {
+  const [state, setState] = useState(0)
+
+  return (<>
+    {state === 0 ? <h1 key="h1">h111 {state}</h1> : null}
+    <div key="0000" onClick={() => setState(0)}>0000</div>
+    {state === 1 ? <h1 key="h1">h111 {state}</h1> : null}
+    <div key="1111" onClick={() => setState(1)}>1111</div>
+  </>)
+}
 
 class DevtoolsWarning extends Component {
   onClick = () => {

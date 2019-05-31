@@ -1,15 +1,13 @@
-import { EMPTY_OBJ, EMPTY_ARR } from '../constants'
-import { Component, enqueueRender } from '../component'
-import { coerceToVNode, Fragment } from '../create-element'
-import { diffChildren } from './children'
-import { diffProps } from './props'
-import { assign, removeNode } from '../util'
-import options from '../options'
+import { EMPTY_OBJ, EMPTY_ARR } from '../constants';
+import { Component, enqueueRender } from '../component';
+import { coerceToVNode, Fragment } from '../create-element';
+import { diffChildren } from './children';
+import { diffProps } from './props';
+import { assign, removeNode } from '../util';
+import options from '../options';
 
 /**
  * Diff two virtual nodes and apply proper changes to the DOM
- * @param {import('../internal').PreactElement | Text} dom The DOM element representing
- * the virtual nodes under diff
  * @param {import('../internal').PreactElement} parentDom The parent of the DOM element
  * @param {import('../internal').VNode | null} newVNode The new virtual node
  * @param {import('../internal').VNode | null} oldVNode The old virtual node
@@ -20,253 +18,219 @@ import options from '../options'
  * mounted components
  * @param {import('../internal').Component | null} ancestorComponent The direct
  * parent component
+ * @param {Element | Text} oldDom The current attached DOM
+ * element any new dom elements should be placed around. Likely `null` on first
+ * render (except when hydrating). Can be a sibling DOM element when diffing
+ * Fragments that have siblings. In most cases, it starts out as `oldChildren[0]._dom`.
  */
-export function diff(
-  dom,
-  parentDom,
-  newVNode,
-  oldVNode,
-  context,
-  isSvg,
-  excessDomChildren,
-  mounts,
-  ancestorComponent,
-  force
-) {
-  // If the previous type doesn't match the new type we drop the whole subtree
-  if (oldVNode == null || newVNode == null || oldVNode.type !== newVNode.type) {
-    if (oldVNode != null) unmount(oldVNode, ancestorComponent)
-    if (newVNode == null) return null
-    dom = null
-    oldVNode = EMPTY_OBJ
-  }
+export function diff(parentDom, newVNode, oldVNode, context, isSvg, excessDomChildren, mounts, ancestorComponent, force, oldDom) {
+	// If the previous type doesn't match the new type we drop the whole subtree
+	if (oldVNode==null || newVNode==null || oldVNode.type!==newVNode.type || oldVNode.key!==newVNode.key) {
+		if (oldVNode!=null) unmount(oldVNode, ancestorComponent);
+		if (newVNode==null) return null;
+		oldVNode = EMPTY_OBJ;
+	}
 
-  if (options.diff) options.diff(newVNode)
+	let c, tmp, isNew, oldProps, oldState, snapshot,
+		newType = newVNode.type, clearProcessingException;
 
-  let c,
-    p,
-    isNew = false,
-    oldProps,
-    oldState,
-    snapshot,
-    newType = newVNode.type
+	// When passing through createElement it assigns the object
+	// constructor as undefined. This to prevent JSON-injection.
+	if (newVNode.constructor !== undefined) return null;
 
-  /** @type {import('../internal').Component | null} */
-  let clearProcessingException
+	if (tmp = options.diff) tmp(newVNode);
 
-  try {
-    outer: if (oldVNode.type === Fragment || newType === Fragment) {
-      diffChildren(
-        parentDom,
-        newVNode,
-        oldVNode,
-        context,
-        isSvg,
-        excessDomChildren,
-        mounts,
-        c
-      )
+	try {
+		outer: if (oldVNode.type===Fragment || newType===Fragment) {
+			// Passing the ancestorComponent instead of c here is needed for catchErrorInComponent
+      // to properly traverse upwards through fragments to find a parent Suspense
+      // Fragment 即 <> 此时直接对比子元素，将子元素添加到parentDom 中
+			diffChildren(parentDom, newVNode, oldVNode, context, isSvg, excessDomChildren, mounts, ancestorComponent, oldDom);
 
-      // Mark dom as empty in case `_children` is any empty array. If it isn't
-      // we'll set `dom` to the correct value just a few lines later.
-      dom = null
+			// Mark dom as empty in case `_children` is any empty array. If it isn't
+			// we'll set `dom` to the correct value just a few lines later.
 
-      if (newVNode._children.length) {
-        dom = newVNode._children[0]._dom
-        newVNode._lastDomChild =
-          newVNode._children[newVNode._children.length - 1]._dom
-      }
-    } else if (typeof newType === 'function') {
-      // type不等于空函数，证明是Component类
+			let i = newVNode._children.length;
+			if (i && (tmp=newVNode._children[0]) != null) {
+				newVNode._dom = tmp._dom;
 
-      // Necessary for createContext api. Setting this property will pass
+				// If the last child is a Fragment, use _lastDomChild, else use _dom
+				// We have no guarantee that the last child rendered something into the
+				// dom, so we iterate backwards to find the last child with a dom node.
+				while (i--) {
+					tmp = newVNode._children[i];
+					if (newVNode._lastDomChild = (tmp && (tmp._lastDomChild || tmp._dom))) {
+						break;
+					}
+				}
+			}
+		}
+		else if (typeof newType==='function') {
+
+			// Necessary for createContext api. Setting this property will pass
       // the context value as `this.context` just for this component.
-      // 通过contextType 判断当前vnode类型是否为 consumer
-      let cxType = newType.contextType
-      // consumer的context中储存了 id 和 defaultValue
-      let provider = cxType && context[cxType._id]
-      // 设置ctx 优先级  provider.props.value -> ctx.default -> ctx
-      let cctx =
-        cxType != null
-          ? provider
-            ? provider.props.value
-            : cxType._defaultValue
-          : context
+      // 判断并设置context
+			tmp = newType.contextType;
+			let provider = tmp && context[tmp._id];
+			let cctx = tmp ? (provider ? provider.props.value : tmp._defaultValue) : context;
 
       // Get component and set it to `c`
       // 原vnode也存在_component, 设置给c
       // c 即为 组件
-      if (oldVNode._component) {
-        c = newVNode._component = oldVNode._component
-        clearProcessingException = c._processingException
-        newVNode._dom = oldVNode._dom
-      } else {
+      // 一般情况下， oldVnode 存在 _component证明是 forceUpdate调用的diff
+      // 此时oldVNode === newVNode
+			if (oldVNode._component) {
+				c = newVNode._component = oldVNode._component;
+				clearProcessingException = c._processingException = c._pendingError;
+				newVNode._dom = oldVNode._dom;
+			}
+			else {
         // 否则使用type的render生成一个实例，设置给 newVNode._component 和 c
-        // Instantiate the new component
-        if (newType.prototype && newType.prototype.render) {
-          // 此处是实例化
-          newVNode._component = c = new newType(newVNode.props, cctx) // eslint-disable-line new-cap
-        } else {
-          // 没有render则生成一个默认的
-          newVNode._component = c = new Component(newVNode.props, cctx)
-          c.constructor = newType
-          c.render = doRender
-        }
-        c._ancestorComponent = ancestorComponent
-        if (provider) provider.sub(c)
+				// Instantiate the new component
+				if (newType.prototype && newType.prototype.render) {
+          // 此处使用调用type生成component实例
+					newVNode._component = c = new newType(newVNode.props, cctx); // eslint-disable-line new-cap
+				}
+				else {
+          // function的render即为自身，dorender调用的是实例化的 constructor，即函数本身
+					newVNode._component = c = new Component(newVNode.props, cctx);
+					c.constructor = newType;
+					c.render = doRender;
+				}
+				c._ancestorComponent = ancestorComponent;
+				if (provider) provider.sub(c);
 
-        c.props = newVNode.props
-        if (!c.state) c.state = {}
-        c.context = cctx
-        c._context = context
-        // 设置代表此对象是新的，要执行钩子
-        isNew = c._dirty = true
-        c._renderCallbacks = []
-      }
+				c.props = newVNode.props;
+				if (!c.state) c.state = {};
+				c.context = cctx;
+        c._context = context;
+        // 新对象要执行钩子
+				isNew = c._dirty = true;
+				c._renderCallbacks = [];
+			}
 
-      c._vnode = newVNode
+			c._vnode = newVNode;
 
-      // Invoke getDerivedStateFromProps
-      let s = c._nextState || c.state
-      if (newType.getDerivedStateFromProps != null) {
-        oldState = assign({}, c.state)
-        if (s === c.state) s = c._nextState = assign({}, s)
-        assign(s, newType.getDerivedStateFromProps(newVNode.props, s))
-      }
+			// Invoke getDerivedStateFromProps
+			if (c._nextState==null) {
+				c._nextState = c.state;
+			}
+			if (newType.getDerivedStateFromProps!=null) {
+				assign(c._nextState==c.state ? (c._nextState = assign({}, c._nextState)) : c._nextState, newType.getDerivedStateFromProps(newVNode.props, c._nextState));
+			}
 
-      // Invoke pre-render lifecycle methods
-      if (isNew) {
-        if (
-          newType.getDerivedStateFromProps == null &&
-          c.componentWillMount != null
-        )
-          c.componentWillMount()
-        if (c.componentDidMount != null) mounts.push(c)
-      } else {
-        if (
-          newType.getDerivedStateFromProps == null &&
-          force == null &&
-          c.componentWillReceiveProps != null
-        ) {
-          c.componentWillReceiveProps(newVNode.props, cctx)
-          s = c._nextState || c.state
-        }
+			// Invoke pre-render lifecycle methods
+			if (isNew) {
+        // 执行钩子
+        if (newType.getDerivedStateFromProps==null && c.componentWillMount!=null) c.componentWillMount();
+        // 如果存在 didMount 推入 mounts中方便统一调用
+				if (c.componentDidMount!=null) mounts.push(c);
+			}
+			else {
+        // 旧的走update钩子
+				if (newType.getDerivedStateFromProps==null && force==null && c.componentWillReceiveProps!=null) {
+					c.componentWillReceiveProps(newVNode.props, cctx);
+				}
+        // 更新state props
+				if (!force && c.shouldComponentUpdate!=null && c.shouldComponentUpdate(newVNode.props, c._nextState, cctx)===false) {
+					c.props = newVNode.props;
+					c.state = c._nextState;
+					c._dirty = false;
+					newVNode._lastDomChild = oldVNode._lastDomChild;
+					break outer;
+				}
 
-        if (
-          !force &&
-          c.shouldComponentUpdate != null &&
-          c.shouldComponentUpdate(newVNode.props, s, cctx) === false
-        ) {
-          dom = newVNode._dom
-          c.props = newVNode.props
-          c.state = s
-          c._dirty = false
-          break outer
-        }
+				if (c.componentWillUpdate!=null) {
+					c.componentWillUpdate(newVNode.props, c._nextState, cctx);
+				}
+			}
 
-        if (c.componentWillUpdate != null) {
-          c.componentWillUpdate(newVNode.props, s, cctx)
-        }
-      }
+			oldProps = c.props;
+			oldState = c.state;
 
-      oldProps = c.props
-      if (!oldState) oldState = c.state
+			c.context = cctx;
+			c.props = newVNode.props;
+			c.state = c._nextState;
 
-      c.context = cctx
-      c.props = newVNode.props
-      c.state = s
+			if (tmp = options.render) tmp(newVNode);
 
-      if (options.render) options.render(newVNode)
+			let prev = c._prevVNode || null;
+			c._dirty = false;
+			let vnode;
 
-      let prev = c._prevVNode
-      let vnode = (c._prevVNode = coerceToVNode(
-        c.render(c.props, c.state, c.context)
-      ))
-      c._dirty = false
+			try {
+        // render后的结果生成另一种vnode (dom渲染用vnode)
+				vnode = c._prevVNode = coerceToVNode(c.render(c.props, c.state, c.context));
+			}
+			catch (e) {
+				if ((tmp = options.catchRender) && tmp(e, c)) return;
+				throw e;
+			}
 
-      if (c.getChildContext != null) {
-        context = assign(assign({}, context), c.getChildContext())
-      }
+			if (c.getChildContext!=null) {
+				context = assign(assign({}, context), c.getChildContext());
+			}
 
-      if (!isNew && c.getSnapshotBeforeUpdate != null) {
-        snapshot = c.getSnapshotBeforeUpdate(oldProps, oldState)
-      }
+			if (!isNew && c.getSnapshotBeforeUpdate!=null) {
+				snapshot = c.getSnapshotBeforeUpdate(oldProps, oldState);
+			}
+      // 设置层级, 用于在更新dom之前对diff排序，从深层到浅层
+      c._depth = ancestorComponent ? (ancestorComponent._depth || 0) + 1 : 0;
+      // diff dom vnode生成 dom
+			c.base = newVNode._dom = diff(parentDom, vnode, prev, context, isSvg, excessDomChildren, mounts, c, null, oldDom);
 
-      c.base = dom = diff(
-        dom,
-        parentDom,
-        vnode,
-        prev,
-        context,
-        isSvg,
-        excessDomChildren,
-        mounts,
-        c,
-        null
-      )
+			if (vnode!=null) {
+				// If this component returns a Fragment (or another component that
+				// returns a Fragment), then _lastDomChild will be non-null,
+				// informing `diffChildren` to diff this component's VNode like a Fragemnt
+				newVNode._lastDomChild = vnode._lastDomChild;
+			}
 
-      if (vnode != null) {
-        // If this component returns a Fragment (or another component that
-        // returns a Fragment), then _lastDomChild will be non-null,
-        // informing `diffChildren` to diff this component's VNode like a Fragemnt
-        newVNode._lastDomChild = vnode._lastDomChild
-      }
+			c._parentDom = parentDom;
 
-      c._parentDom = parentDom
+			if (tmp = newVNode.ref) applyRef(tmp, c, ancestorComponent);
+      // setState 第二个参可以传入回调，在生成了dom之后调用回调
+			while (tmp=c._renderCallbacks.pop()) tmp.call(c);
 
-      if (newVNode.ref) applyRef(newVNode.ref, c, ancestorComponent)
-    } else {
-      dom = diffElementNodes(
-        dom,
-        newVNode,
-        oldVNode,
-        context,
-        isSvg,
-        excessDomChildren,
-        mounts,
-        ancestorComponent
-      )
+			// Don't call componentDidUpdate on mount or when we bailed out via
+			// `shouldComponentUpdate`
+			if (!isNew && oldProps!=null && c.componentDidUpdate!=null) {
+				c.componentDidUpdate(oldProps, oldState, snapshot);
+			}
+		}
+		else {
+			newVNode._dom = diffElementNodes(oldVNode._dom, newVNode, oldVNode, context, isSvg, excessDomChildren, mounts, ancestorComponent);
 
-      if (newVNode.ref && oldVNode.ref !== newVNode.ref) {
-        applyRef(newVNode.ref, dom, ancestorComponent)
-      }
-    }
+			if ((tmp = newVNode.ref) && (oldVNode.ref !== tmp)) {
+				applyRef(tmp, newVNode._dom, ancestorComponent);
+			}
+		}
 
-    newVNode._dom = dom
+		if (clearProcessingException) {
+			c._pendingError = c._processingException = null;
+		}
 
-    if (c != null) {
-      while ((p = c._renderCallbacks.pop())) p.call(c)
+		if (tmp = options.diffed) tmp(newVNode);
+	}
+	catch (e) {
+		catchErrorInComponent(e, ancestorComponent);
+	}
 
-      // Don't call componentDidUpdate on mount or when we bailed out via
-      // `shouldComponentUpdate`
-      if (!isNew && oldProps != null && c.componentDidUpdate != null) {
-        c.componentDidUpdate(oldProps, oldState, snapshot)
-      }
-    }
-
-    if (clearProcessingException) {
-      c._processingException = null
-    }
-
-    if (options.diffed) options.diffed(newVNode)
-  } catch (e) {
-    catchErrorInComponent(e, ancestorComponent)
-  }
-
-  return dom
+	return newVNode._dom;
 }
 
 export function commitRoot(mounts, root) {
-  let c
-  while ((c = mounts.pop())) {
-    try {
-      c.componentDidMount()
-    } catch (e) {
-      catchErrorInComponent(e, c._ancestorComponent)
-    }
-  }
+	let c;
+	while ((c = mounts.pop())) {
+		try {
+			c.componentDidMount();
+		}
+		catch (e) {
+			catchErrorInComponent(e, c._ancestorComponent);
+		}
+	}
 
-  if (options.commit) options.commit(root)
+	if (options.commit) options.commit(root);
 }
 
 /**
@@ -284,101 +248,65 @@ export function commitRoot(mounts, root) {
  * component to the ones being diffed
  * @returns {import('../internal').PreactElement}
  */
-function diffElementNodes(
-  dom,
-  newVNode,
-  oldVNode,
-  context,
-  isSvg,
-  excessDomChildren,
-  mounts,
-  ancestorComponent
-) {
-  let d = dom
+function diffElementNodes(dom, newVNode, oldVNode, context, isSvg, excessDomChildren, mounts, ancestorComponent) {
+	let i;
+	let oldProps = oldVNode.props;
+	let newProps = newVNode.props;
 
-  // Tracks entering and exiting SVG namespace when descending through the tree.
-  isSvg = newVNode.type === 'svg' || isSvg
+	// Tracks entering and exiting SVG namespace when descending through the tree.
+	isSvg = newVNode.type==='svg' || isSvg;
 
-  if (dom == null && excessDomChildren != null) {
-    for (let i = 0; i < excessDomChildren.length; i++) {
-      const child = excessDomChildren[i]
-      if (
-        child != null &&
-        (newVNode.type === null
-          ? child.nodeType === 3
-          : child.localName === newVNode.type)
-      ) {
-        dom = child
-        excessDomChildren[i] = null
-        break
-      }
-    }
-  }
+	if (dom==null && excessDomChildren!=null) {
+		for (i=0; i<excessDomChildren.length; i++) {
+			const child = excessDomChildren[i];
+			if (child!=null && (newVNode.type===null ? child.nodeType===3 : child.localName===newVNode.type)) {
+				dom = child;
+				excessDomChildren[i] = null;
+				break;
+			}
+		}
+	}
 
-  if (dom == null) {
-    dom =
-      newVNode.type === null
-        ? document.createTextNode(newVNode.text)
-        : isSvg
-        ? document.createElementNS('http://www.w3.org/2000/svg', newVNode.type)
-        : document.createElement(newVNode.type)
+	if (dom==null) {
+		if (newVNode.type===null) {
+			return document.createTextNode(newProps);
+		}
+		dom = isSvg ? document.createElementNS('http://www.w3.org/2000/svg', newVNode.type) : document.createElement(newVNode.type);
+		// we created a new parent, so none of the previously attached children can be reused:
+		excessDomChildren = null;
+	}
 
-    // we created a new parent, so none of the previously attached children can be reused:
-    excessDomChildren = null
-  }
-  newVNode._dom = dom
+	if (newVNode.type===null) {
+		if (oldProps !== newProps) {
+			dom.data = newProps;
+		}
+	}
+	else {
+		if (excessDomChildren!=null && dom.childNodes!=null) {
+			excessDomChildren = EMPTY_ARR.slice.call(dom.childNodes);
+		}
+		if (newVNode!==oldVNode) {
+			let oldProps = oldVNode.props || EMPTY_OBJ;
+			let newProps = newVNode.props;
 
-  if (newVNode.type === null) {
-    if ((d === null || dom === d) && newVNode.text !== oldVNode.text) {
-      dom.data = newVNode.text
-    }
-  } else {
-    if (excessDomChildren != null && dom.childNodes != null) {
-      excessDomChildren = EMPTY_ARR.slice.call(dom.childNodes)
-    }
-    if (newVNode !== oldVNode) {
-      let oldProps = oldVNode.props
-      let newProps = newVNode.props
+			let oldHtml = oldProps.dangerouslySetInnerHTML;
+			let newHtml = newProps.dangerouslySetInnerHTML;
+			if ((newHtml || oldHtml) && excessDomChildren==null) {
+				// Avoid re-applying the same '__html' if it did not changed between re-render
+				if (!newHtml || !oldHtml || newHtml.__html!=oldHtml.__html) {
+					dom.innerHTML = newHtml && newHtml.__html || '';
+				}
+			}
+			if (newProps.multiple) {
+				dom.multiple = newProps.multiple;
+			}
 
-      // if we're hydrating, use the element's attributes as its current props:
-      if (oldProps == null) {
-        oldProps = {}
-        if (excessDomChildren != null) {
-          let name
-          for (let i = 0; i < dom.attributes.length; i++) {
-            name = dom.attributes[i].name
-            oldProps[
-              name == 'class' && newProps.className ? 'className' : name
-            ] = dom.attributes[i].value
-          }
-        }
-      }
-      let oldHtml = oldProps.dangerouslySetInnerHTML
-      let newHtml = newProps.dangerouslySetInnerHTML
-      if (newHtml || oldHtml) {
-        // Avoid re-applying the same '__html' if it did not changed between re-render
-        if (!newHtml || !oldHtml || newHtml.__html != oldHtml.__html) {
-          dom.innerHTML = (newHtml && newHtml.__html) || ''
-        }
-      }
-      if (newProps.multiple) {
-        dom.multiple = newProps.multiple
-      }
-      diffChildren(
-        dom,
-        newVNode,
-        oldVNode,
-        context,
-        newVNode.type === 'foreignObject' ? false : isSvg,
-        excessDomChildren,
-        mounts,
-        ancestorComponent
-      )
-      diffProps(dom, newProps, oldProps, isSvg)
-    }
-  }
+			diffChildren(dom, newVNode, oldVNode, context, newVNode.type==='foreignObject' ? false : isSvg, excessDomChildren, mounts, ancestorComponent, EMPTY_OBJ);
+			diffProps(dom, newProps, oldProps, isSvg);
+		}
+	}
 
-  return dom
+	return dom;
 }
 
 /**
@@ -387,12 +315,13 @@ function diffElementNodes(
  * @param {any} [value]
  */
 export function applyRef(ref, value, ancestorComponent) {
-  try {
-    if (typeof ref == 'function') ref(value)
-    else ref.current = value
-  } catch (e) {
-    catchErrorInComponent(e, ancestorComponent)
-  }
+	try {
+		if (typeof ref=='function') ref(value);
+		else ref.current = value;
+	}
+	catch (e) {
+		catchErrorInComponent(e, ancestorComponent);
+	}
 }
 
 /**
@@ -400,47 +329,49 @@ export function applyRef(ref, value, ancestorComponent) {
  * @param {import('../internal').VNode} vnode The virtual node to unmount
  * @param {import('../internal').Component} ancestorComponent The parent
  * component to this virtual node
- * @param {boolean} skipRemove Flag that indicates that a parent node of the
+ * @param {boolean} [skipRemove] Flag that indicates that a parent node of the
  * current element is already detached from the DOM.
  */
 export function unmount(vnode, ancestorComponent, skipRemove) {
-  let r
-  if (options.unmount) options.unmount(vnode)
+	let r;
+	if (options.unmount) options.unmount(vnode);
 
-  if ((r = vnode.ref)) {
-    applyRef(r, null, ancestorComponent)
-  }
+	if (r = vnode.ref) {
+		applyRef(r, null, ancestorComponent);
+	}
 
-  let dom
-  if (!skipRemove && vnode._lastDomChild == null) {
-    skipRemove = (dom = vnode._dom) != null
-  }
+	let dom;
+	if (!skipRemove && vnode._lastDomChild==null) {
+		skipRemove = (dom = vnode._dom)!=null;
+	}
 
-  vnode._dom = vnode._lastDomChild = null
+	vnode._dom = vnode._lastDomChild = null;
 
-  if ((r = vnode._component) != null) {
-    if (r.componentWillUnmount) {
-      try {
-        r.componentWillUnmount()
-      } catch (e) {
-        catchErrorInComponent(e, ancestorComponent)
-      }
-    }
+	if ((r = vnode._component)!=null) {
+		if (r.componentWillUnmount) {
+			try {
+				r.componentWillUnmount();
+			}
+			catch (e) {
+				catchErrorInComponent(e, ancestorComponent);
+			}
+		}
 
-    r.base = r._parentDom = null
-    if ((r = r._prevVNode)) unmount(r, ancestorComponent, skipRemove)
-  } else if ((r = vnode._children)) {
-    for (let i = 0; i < r.length; i++) {
-      unmount(r[i], ancestorComponent, skipRemove)
-    }
-  }
+		r.base = r._parentDom = null;
+		if (r = r._prevVNode) unmount(r, ancestorComponent, skipRemove);
+	}
+	else if (r = vnode._children) {
+		for (let i = 0; i < r.length; i++) {
+			if (r[i]) unmount(r[i], ancestorComponent, skipRemove);
+		}
+	}
 
-  if (dom != null) removeNode(dom)
+	if (dom!=null) removeNode(dom);
 }
 
 /** The `.render()` method for a PFC backing instance. */
 function doRender(props, state, context) {
-  return this.constructor(props, context)
+	return this.constructor(props, context);
 }
 
 /**
@@ -450,23 +381,27 @@ function doRender(props, state, context) {
  * component check for error boundary behaviors
  */
 function catchErrorInComponent(error, component) {
-  for (; component; component = component._ancestorComponent) {
-    if (!component._processingException) {
-      try {
-        if (component.constructor.getDerivedStateFromError != null) {
-          component.setState(
-            component.constructor.getDerivedStateFromError(error)
-          )
-        } else if (component.componentDidCatch != null) {
-          component.componentDidCatch(error)
-        } else {
-          continue
-        }
-        return enqueueRender((component._processingException = component))
-      } catch (e) {
-        error = e
-      }
-    }
-  }
-  throw error
+	if (options.catchError) { options.catchError(error, component); }
+
+	for (; component; component = component._ancestorComponent) {
+		if (!component._processingException) {
+			try {
+				if (component.constructor && component.constructor.getDerivedStateFromError!=null) {
+					component.setState(component.constructor.getDerivedStateFromError(error));
+				}
+				else if (component.componentDidCatch!=null) {
+					component.componentDidCatch(error);
+				}
+				else {
+					continue;
+				}
+				return enqueueRender(component._pendingError = component);
+			}
+			catch (e) {
+				error = e;
+			}
+		}
+	}
+
+	throw error;
 }

@@ -49,6 +49,7 @@ export interface Component<P = {}, S = {}> extends preact.Component<P, S> {
 	_nextState?: S | null;
 	/** Only used in the devtools to later dirty check if state has changed */
 	_prevState?: S | null;
+	_depth?: number;
 	/**
 	 * Pointer to the parent dom node. This is only needed for top-level Fragment
 	 * components or array returns.
@@ -57,6 +58,7 @@ export interface Component<P = {}, S = {}> extends preact.Component<P, S> {
 	_prevVNode?: VNode | null;
 	_ancestorComponent?: Component<any, any>;
 	_processingException?: Component<any, any> | null;
+	_pendingError?: Component<any, any> | null;
 }
 
 export interface PreactContext extends preact.Context<any> {
